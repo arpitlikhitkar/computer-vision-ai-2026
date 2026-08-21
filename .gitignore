@@ -1,0 +1,34 @@
+# Python Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output directories & generated artifacts
+outputs/
+*.avi
+*.mp4
+*.png
+*.jpg
+
+# Large Model Weights & Datasets
+# Note: Small pretrained models (e.g. yolov8n.pt ~6MB) can optionally be tracked in Git.
+# However, larger models (*.pt, *.onnx, *.engine, *.bin) and dataset files should be
+# stored in remote storage (S3/DVC/MLflow) and ignored here.
+models/*.engine
+models/*.onnx
+data/raw/*
+data/processed/*
+data/datasets/*
+
+# IDE and OS settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

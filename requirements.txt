@@ -1,0 +1,6 @@
+# Computer Vision & AI Core Dependencies
+torch
+torchvision
+opencv-python
+numpy
+ultralytics

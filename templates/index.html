@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Household AI — Face Recognition Software</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="app-title">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2">
+                <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                <circle cx="12" cy="10" r="3"/>
+                <path d="M7 18a5 5 0 0 1 10 0"/>
+            </svg>
+            <h1>Household AI — Security Dashboard</h1>
+        </div>
+        <div class="status-badge">
+            <div class="pulse-dot"></div>
+            <span>LIVE CAM SYSTEM ACTIVE</span>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+
+        <!-- Left Column: Video Feed & Recognition Logs -->
+        <div class="left-col">
+            <!-- Video Container -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🎥 Live Face Recognition Stream</h2>
+                    <span style="font-size: 0.85rem; color: var(--accent-emerald);">Green = Known | Red = Unknown</span>
+                </div>
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" class="video-stream" alt="Live Camera Stream">
+                </div>
+            </div>
+
+            <!-- Recognition Audit Logs -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📜 Recognition Audit Logs</h2>
+                    <button class="btn-sm btn-secondary" onclick="fetchRecentLogs()">🔄 Refresh Logs</button>
+                </div>
+                <div class="logs-table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Track ID</th>
+                                <th>Recognition Result</th>
+                                <th>Similarity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <tr>
+                                <td colspan="4" style="text-align: center; color: var(--text-secondary);">Loading logs...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Enrollment & Enrolled Members -->
+        <div class="right-col">
+
+            <!-- Member Enrollment Form -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>👤 Enroll New Household Member</h2>
+                </div>
+                <form id="enrollmentForm">
+                    <div class="form-group">
+                        <label for="memberNameInput">Member Full Name</label>
+                        <input type="text" id="memberNameInput" class="form-input" placeholder="e.g. Rahul Sharma" required>
+                    </div>
+                    <button type="submit" id="startEnrollBtn" class="btn btn-primary">
+                        ✨ Start Face Enrollment
+                    </button>
+                    <div class="progress-bar-container">
+                        <div id="progressBarFill" class="progress-bar-fill"></div>
+                    </div>
+                    <div id="enrollStatusMsg" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);"></div>
+                </form>
+            </div>
+
+            <!-- Enrolled Members List -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📋 Enrolled Household Members</h2>
+                    <button class="btn-sm btn-secondary" onclick="fetchEnrolledMembers()">🔄 Refresh</button>
+                </div>
+                <div id="membersList" class="members-list">
+                    <div style="text-align: center; color: var(--text-secondary); padding: 20px;">
+                        Loading enrolled members...
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
