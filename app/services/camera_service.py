@@ -1,7 +1,6 @@
 """
 Camera Worker Thread Service for PySide6 UI
-
-Emits frame_processed(QImage, active_tracks, known_count, unknown_count, fps)
+Updated with non-blocking stop() to eliminate GUI deadlocks and button freezes.
 """
 
 import time
@@ -49,7 +48,9 @@ class CameraWorker(QThread):
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.camera_height)
 
         # Warmup
-        for _ in range(10):
+        for _ in range(5):
+            if not self.running:
+                break
             cap.read()
 
         fps_start = time.time()
@@ -58,12 +59,18 @@ class CameraWorker(QThread):
 
         while self.running:
             ret, frame = cap.read()
+            if not self.running:
+                break
+
             if not ret or frame is None:
                 time.sleep(0.03)
                 continue
 
             frame_cnt += 1
             processed_frame, active_tracks, known_count, unknown_count = self.engine.process_frame(frame)
+
+            if not self.running:
+                break
 
             elapsed = time.time() - fps_start
             if elapsed >= 1.0:
@@ -84,5 +91,5 @@ class CameraWorker(QThread):
         self.status_changed.emit("STOPPED")
 
     def stop(self):
+        """Non-blocking thread stop. Never blocks main GUI event loop."""
         self.running = False
-        self.wait()

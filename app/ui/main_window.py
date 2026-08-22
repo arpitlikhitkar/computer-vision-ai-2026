@@ -1,15 +1,18 @@
 """
 Main Window for PySide6 Desktop Application
 Includes Top Header Bar + Left Sidebar Navigation + QStackedWidget Pages
+Updated with Safe closeEvent & Multi-Modal Identity Protections
 """
 
 import torch
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QStackedWidget, QButtonGroup, QFrame
+    QStackedWidget, QButtonGroup, QFrame, QMessageBox
 )
 from PySide6.QtCore import Qt
 
+from app.config.settings import config
+from app.services.alarm_service import alarm_service
 from app.ui.styles import DARK_THEME_QSS
 from app.ui.dashboard_page import DashboardPage
 from app.ui.live_camera_page import LiveCameraPage
@@ -55,94 +58,157 @@ class MainWindow(QMainWindow):
 
         device_str = "NVIDIA CUDA (GPU)" if torch.cuda.is_available() else "CPU Mode"
         self.lbl_device_status = QLabel(f"Device: {device_str} | Status: INITIALIZING")
-        self.lbl_device_status.setStyleSheet("color: #10b981; font-weight: bold;")
+        self.lbl_device_status.setObjectName("statusLabel")
+
+        # Top Header Alarm Stop & Mute Toggle Button
+        self.btn_alarm_toggle = QPushButton()
+        self.btn_alarm_toggle.setCursor(Qt.PointingHandCursor)
+        self.update_alarm_btn_style()
+        self.btn_alarm_toggle.clicked.connect(self.toggle_alarm_mute)
 
         top_layout.addWidget(lbl_logo)
         top_layout.addStretch()
+        top_layout.addWidget(self.btn_alarm_toggle)
         top_layout.addWidget(self.lbl_device_status)
 
         root_layout.addWidget(top_header)
 
-        # 2. Main Content Splitter (Sidebar + Pages Stack)
-        body_layout = QHBoxLayout()
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
+        # 2. Main Content Area (Sidebar + Stacked Pages)
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
-        # Sidebar Navigation Panel
+        # Sidebar Navigation
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        vbox_sidebar = QVBoxLayout(sidebar)
-        vbox_sidebar.setContentsMargins(10, 15, 10, 15)
-        vbox_sidebar.setSpacing(8)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 20, 10, 20)
+        sidebar_layout.setSpacing(8)
 
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
 
         nav_items = [
             ("📊 Dashboard", 0),
-            ("🎥 Live Camera", 1),
-            ("👤 People", 2),
+            ("📹 Live Camera", 1),
+            ("👥 People", 2),
             ("✨ Enroll Wizard", 3),
             ("❓ Unknown", 4),
             ("📜 Events", 5),
-            ("📹 Recordings", 6),
+            ("🎥 Recordings", 6),
             ("📷 Camera Settings", 7),
             ("🤖 AI Settings", 8),
             ("🧠 Models", 9),
-            ("⚙️ Settings", 10)
+            ("⚙️ Settings", 10),
         ]
 
         for text, page_idx in nav_items:
             btn = QPushButton(text)
-            btn.setObjectName("navBtn")
             btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setObjectName("navBtn")
+            self.btn_group.addButton(btn, page_idx)
+            sidebar_layout.addWidget(btn)
+
             if page_idx == 0:
                 btn.setChecked(True)
 
-            self.btn_group.addButton(btn, page_idx)
-            vbox_sidebar.addWidget(btn)
-
-        vbox_sidebar.addStretch()
-        body_layout.addWidget(sidebar)
+        sidebar_layout.addStretch()
+        content_layout.addWidget(sidebar, 0)
 
         # QStackedWidget Pages
         self.stacked_widget = QStackedWidget()
 
         self.page_dashboard = DashboardPage()
-        self.page_live = LiveCameraPage()
+        self.page_live_camera = LiveCameraPage()
         self.page_people = PeoplePage()
         self.page_enroll = EnrollPage()
         self.page_unknown = UnknownPage()
         self.page_events = EventsPage()
         self.page_recordings = RecordingsPage()
-        self.page_cam_settings = CameraSettingsPage()
+        self.page_camera_settings = CameraSettingsPage()
         self.page_ai_settings = AISettingsPage()
         self.page_models = ModelPage()
         self.page_settings = SettingsPage()
 
-        self.stacked_widget.addWidget(self.page_dashboard)     # Index 0
-        self.stacked_widget.addWidget(self.page_live)          # Index 1
-        self.stacked_widget.addWidget(self.page_people)        # Index 2
-        self.stacked_widget.addWidget(self.page_enroll)        # Index 3
-        self.stacked_widget.addWidget(self.page_unknown)       # Index 4
-        self.stacked_widget.addWidget(self.page_events)        # Index 5
-        self.stacked_widget.addWidget(self.page_recordings)    # Index 6
-        self.stacked_widget.addWidget(self.page_cam_settings)  # Index 7
-        self.stacked_widget.addWidget(self.page_ai_settings)   # Index 8
-        self.stacked_widget.addWidget(self.page_models)        # Index 9
-        self.stacked_widget.addWidget(self.page_settings)      # Index 10
+        self.stacked_widget.addWidget(self.page_dashboard)
+        self.stacked_widget.addWidget(self.page_live_camera)
+        self.stacked_widget.addWidget(self.page_people)
+        self.stacked_widget.addWidget(self.page_enroll)
+        self.stacked_widget.addWidget(self.page_unknown)
+        self.stacked_widget.addWidget(self.page_events)
+        self.stacked_widget.addWidget(self.page_recordings)
+        self.stacked_widget.addWidget(self.page_camera_settings)
+        self.stacked_widget.addWidget(self.page_ai_settings)
+        self.stacked_widget.addWidget(self.page_models)
+        self.stacked_widget.addWidget(self.page_settings)
 
-        body_layout.addWidget(self.stacked_widget, 1)
-        root_layout.addLayout(body_layout, 1)
+        content_layout.addWidget(self.stacked_widget, 1)
+        root_layout.addLayout(content_layout, 1)
 
-        # Connect Sidebar Buttons to Stacked Widget
         self.btn_group.idClicked.connect(self.switch_page)
+        self.page_unknown.enroll_requested.connect(self.start_enrollment_for)
+        self.page_live_camera.camera_toggle_requested.connect(self.handle_camera_toggle)
 
-        # Connect Unknown Page Enroll Request Signal to Enroll Wizard
-        self.page_unknown.enroll_requested.connect(self.trigger_enroll_from_unknown)
+    def handle_camera_toggle(self, active: bool):
+        if not active:
+            if self.camera_worker and self.camera_worker.isRunning():
+                self.camera_worker.stop()
+                self.lbl_device_status.setText("Device: CPU Mode | Status: STOPPED")
+        else:
+            if not self.camera_worker or not self.camera_worker.isRunning():
+                self.start_camera_worker()
 
-        # Connect Live Camera Toggle Button
-        self.page_live.btn_toggle.clicked.connect(self.toggle_camera_worker)
+    def update_alarm_btn_style(self):
+        if config.enable_audio_alarm:
+            self.btn_alarm_toggle.setText("🔔 Alarm Siren Active")
+            self.btn_alarm_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #10b981;
+                    color: white;
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
+        else:
+            self.btn_alarm_toggle.setText("🔕 Alarm Muted")
+            self.btn_alarm_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #ef4444;
+                    color: white;
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                }
+                QPushButton:hover {
+                    background-color: #dc2626;
+                }
+            """)
+
+    def toggle_alarm_mute(self):
+        if hasattr(alarm_service, 'toggle_mute'):
+            new_active = alarm_service.toggle_mute()
+            self.update_alarm_btn_style()
+            if new_active:
+                QMessageBox.information(self, "Alarm Siren Sound", "🔔 Security Siren Sound ENABLED for Unknown Detections!")
+            else:
+                QMessageBox.information(self, "Alarm Siren Sound", "🔕 Security Siren Sound MUTED! All active alarms stopped.")
+
+    def start_camera_worker(self):
+        self.camera_worker = CameraWorker(parent=self)
+        self.camera_worker.frame_processed.connect(self.page_live_camera.update_frame)
+        self.camera_worker.status_changed.connect(self.update_status_bar)
+        self.camera_worker.start()
+
+    def update_status_bar(self, status_text):
+        device_str = "NVIDIA CUDA (GPU)" if torch.cuda.is_available() else "CPU Mode"
+        self.lbl_device_status.setText(f"Device: {device_str} | Status: {status_text}")
 
     def switch_page(self, page_idx):
         self.stacked_widget.setCurrentIndex(page_idx)
@@ -155,41 +221,17 @@ class MainWindow(QMainWindow):
         elif page_idx == 5:
             self.page_events.load_events()
 
-    def trigger_enroll_from_unknown(self, name):
-        self.page_enroll.set_prefill_name(name)
-        # Check Enroll Wizard button
-        for btn in self.btn_group.buttons():
-            if self.btn_group.id(btn) == 3:
-                btn.setChecked(True)
-                break
+    def start_enrollment_for(self, person_name):
+        self.page_enroll.input_name.setText(person_name)
         self.stacked_widget.setCurrentIndex(3)
-
-    def start_camera_worker(self):
-        if self.camera_worker is None or not self.camera_worker.isRunning():
-            self.camera_worker = CameraWorker()
-            self.camera_worker.frame_processed.connect(self.on_frame_processed)
-            self.camera_worker.status_changed.connect(self.on_worker_status_changed)
-            self.camera_worker.start()
-
-    def toggle_camera_worker(self):
-        if self.camera_worker and self.camera_worker.isRunning():
-            self.camera_worker.stop()
-            self.page_live.btn_toggle.setText("▶ Start Camera Feed")
-            self.page_live.btn_toggle.setStyleSheet("background-color: #10b981; color: white; padding: 10px 20px; font-weight: bold;")
-        else:
-            self.start_camera_worker()
-            self.page_live.btn_toggle.setText("⏹ Stop Camera Feed")
-            self.page_live.btn_toggle.setStyleSheet("background-color: #ef4444; color: white; padding: 10px 20px; font-weight: bold;")
-
-    def on_frame_processed(self, qt_img, active_tracks, known_cnt, unknown_cnt, fps):
-        self.page_live.update_frame(qt_img, active_tracks, known_cnt, unknown_cnt, fps)
-        self.page_dashboard.update_live_metrics(active_tracks, known_cnt, unknown_cnt, fps)
-
-    def on_worker_status_changed(self, status_msg):
-        device_str = "NVIDIA CUDA (GPU)" if torch.cuda.is_available() else "CPU Mode"
-        self.lbl_device_status.setText(f"Device: {device_str} | Status: {status_msg}")
+        self.btn_group.button(3).setChecked(True)
 
     def closeEvent(self, event):
-        if self.camera_worker and self.camera_worker.isRunning():
+        if self.camera_worker:
             self.camera_worker.stop()
+        if hasattr(alarm_service, 'stop_alarm'):
+            try:
+                alarm_service.stop_alarm()
+            except Exception:
+                pass
         event.accept()

@@ -1,22 +1,23 @@
 """
-Recognition Audit Events Page for PySide6 Application
+Events Timeline Page for PySide6 Application (Phase 6.9)
+Displays structured event timeline with filters, priority color-coding & image previews
 """
 
+import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QScrollArea, QGridLayout, QMessageBox, QComboBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QPixmap, QDesktopServices
+
 from app.database.event_repository import EventRepository
-from app.database.person_repository import PersonRepository
 
 
 class EventsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.event_repo = EventRepository()
-        self.person_repo = PersonRepository()
-
         self.init_ui()
 
     def init_ui(self):
@@ -26,49 +27,95 @@ class EventsPage(QWidget):
 
         # Header
         top_layout = QHBoxLayout()
-        title = QLabel("📜 Historical Recognition Audit Events")
+        title = QLabel("📜 Structured AI Events & Multi-Entity Timeline")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #f8fafc;")
 
-        btn_refresh = QPushButton("🔄 Refresh Events")
+        self.combo_filter = QComboBox()
+        self.combo_filter.addItems(["ALL", "PERSON_DETECTED", "HOLDING", "ANIMAL_DETECTED", "ALERT_SUSPICIOUS"])
+        self.combo_filter.currentTextChanged.connect(self.load_events)
+
+        btn_refresh = QPushButton("🔄 Refresh Timeline")
         btn_refresh.setObjectName("secondaryBtn")
         btn_refresh.clicked.connect(self.load_events)
 
         top_layout.addWidget(title)
         top_layout.addStretch()
+        top_layout.addWidget(QLabel("Filter Type:"))
+        top_layout.addWidget(self.combo_filter)
         top_layout.addWidget(btn_refresh)
 
         layout.addLayout(top_layout)
 
-        # Table Widget
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
-            "Event ID", "Timestamp", "Track ID", "Recognition Result", "Similarity"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        # Scroll Area
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("background-color: transparent; border: none;")
 
-        layout.addWidget(self.table)
+        self.container = QWidget()
+        self.vbox_events = QVBoxLayout(self.container)
+        self.vbox_events.setSpacing(10)
+
+        self.scroll.setWidget(self.container)
+        layout.addWidget(self.scroll, 1)
 
         self.load_events()
 
     def load_events(self):
-        events = self.event_repo.get_recent_events(limit=50)
-        self.table.setRowCount(0)
+        for i in reversed(range(self.vbox_events.count())):
+            w = self.vbox_events.itemAt(i).widget()
+            if w:
+                w.setParent(None)
 
-        for row_idx, e in enumerate(events):
-            self.table.insertRow(row_idx)
+        type_filter = self.combo_filter.currentText()
+        events = self.event_repo.get_events(type_filter=type_filter, limit=50)
 
-            person_name = "UNKNOWN"
-            if e["person_uuid"]:
-                p = self.person_repo.get_person_by_uuid(e["person_uuid"])
-                if p:
-                    person_name = p["display_name"]
+        if not events:
+            lbl_empty = QLabel("No events recorded for selected filter.")
+            lbl_empty.setStyleSheet("color: #94a3b8; font-size: 14px;")
+            self.vbox_events.addWidget(lbl_empty)
+            return
 
-            res_str = f"🟢 KNOWN ({person_name})" if e["recognition_result"] == "KNOWN" else "🔴 UNKNOWN"
+        for evt in events:
+            card = self.create_event_card(evt)
+            self.vbox_events.addWidget(card)
 
-            self.table.setItem(row_idx, 0, QTableWidgetItem(str(e["id"])))
-            self.table.setItem(row_idx, 1, QTableWidgetItem(e["timestamp"][:19]))
-            self.table.setItem(row_idx, 2, QTableWidgetItem(f"Track {e['track_id']}"))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(res_str))
-            self.table.setItem(row_idx, 4, QTableWidgetItem(f"{e['similarity_score']*100:.1f}%"))
+    def create_event_card(self, evt):
+        card = QFrame()
+
+        priority = evt.get("priority", "INFO")
+        border_color = "#10b981"  # Green
+        if priority == "WARNING":
+            border_color = "#eab308"  # Yellow
+        elif priority == "ALERT":
+            border_color = "#ef4444"  # Red
+
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: #1e293b;
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 10px;
+            }}
+        """)
+
+        hbox = QHBoxLayout(card)
+
+        # Info
+        s_name = evt.get("subject_name") or evt.get("subject_track_id") or "Entity"
+        rel_str = f" ➔ {evt['relationship']} ➔ {evt['object_class']}" if evt.get("relationship") else ""
+
+        lbl_info = QLabel(
+            f"<b>[{evt['priority']}] {evt['event_type']}</b>{rel_str}<br>"
+            f"Subject: <b>{s_name}</b> | Conf: {evt['confidence']*100:.0f}%<br>"
+            f"<span style='color: #94a3b8; font-size: 11px;'>Timestamp: {evt['timestamp'][:19]}</span>"
+        )
+        lbl_info.setStyleSheet("color: #f8fafc; font-size: 13px;")
+
+        hbox.addWidget(lbl_info, 1)
+
+        if evt.get("image_path") and os.path.exists(evt["image_path"]):
+            btn_img = QPushButton("📷 View Frame")
+            btn_img.clicked.connect(lambda _, p=evt["image_path"]: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
+            hbox.addWidget(btn_img)
+
+        return card

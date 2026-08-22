@@ -1,9 +1,12 @@
 """
 Unknown People Detections Management Page for PySide6 Application
-Displays unique folder per Unknown Person + Video Clip Playback + Open Folder Button
+Displays unique folder per Unknown Person + Video Clip Duration & Readable Time
+Updated with Human-Readable Date/Time & Video Duration in Seconds.
 """
 
 import os
+import datetime
+import cv2
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QGridLayout, QInputDialog, QMessageBox
@@ -32,13 +35,14 @@ class UnknownPage(QWidget):
         title = QLabel("❓ Unknown Detections & Unique Person Folders")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #f8fafc;")
 
-        btn_refresh = QPushButton("🔄 Refresh List")
-        btn_refresh.setObjectName("secondaryBtn")
-        btn_refresh.clicked.connect(self.load_unknowns)
+        self.btn_refresh = QPushButton("🔄 Refresh List")
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh.setObjectName("secondaryBtn")
+        self.btn_refresh.clicked.connect(self.load_unknowns)
 
         top_layout.addWidget(title)
         top_layout.addStretch()
-        top_layout.addWidget(btn_refresh)
+        top_layout.addWidget(self.btn_refresh)
 
         layout.addLayout(top_layout)
 
@@ -106,13 +110,46 @@ class UnknownPage(QWidget):
         folder_dir = os.path.dirname(snap_path)
         folder_name = os.path.basename(folder_dir)
 
+        # Extract Video Clip Duration in Seconds
         has_video = u_data.get("video_clip_path") and os.path.exists(u_data["video_clip_path"])
-        video_badge = "🎥 60s Video Clip Ready" if has_video else "📷 Snapshot Only"
+        duration_sec = 60.0
+        if has_video:
+            try:
+                cap = cv2.VideoCapture(u_data["video_clip_path"])
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    if fps > 0 and frame_count > 0:
+                        duration_sec = frame_count / fps
+                cap.release()
+            except Exception:
+                duration_sec = 60.0
+
+        video_badge = f"🎥 {duration_sec:.0f}s Video Clip Ready" if has_video else "📷 Snapshot Only"
+
+        # Format Human Readable Date & Time
+        raw_created = str(u_data.get('created_at', ''))
+        if len(raw_created) >= 19 and "T" in raw_created:
+            date_part, time_part = raw_created.split("T")
+            time_part = time_part[:8]
+        elif len(raw_created) >= 19 and " " in raw_created:
+            date_part, time_part = raw_created.split(" ")
+            time_part = time_part[:8]
+        else:
+            try:
+                # If unix timestamp integer
+                ts = float(raw_created)
+                dt = datetime.datetime.fromtimestamp(ts)
+                date_part = dt.strftime("%Y-%m-%d")
+                time_part = dt.strftime("%H:%M:%S")
+            except Exception:
+                date_part = datetime.datetime.now().strftime("%Y-%m-%d")
+                time_part = datetime.datetime.now().strftime("%H:%M:%S")
 
         lbl_info = QLabel(
             f"<b>Unknown Track #{u_data['track_id']}</b> (ID: #{u_data['id']})<br>"
             f"📁 Folder: <code>{folder_name}</code><br>"
-            f"Date: {u_data['created_at'][:10]} | Time: {u_data['created_at'][11:19]}<br>"
+            f"Date: <b>{date_part}</b> | Time: <b>{time_part}</b><br>"
             f"Best Sim: {u_data['best_similarity']*100:.0f}%<br>"
             f"<span style='color: #10b981; font-weight: bold;'>{video_badge}</span>"
         )
@@ -122,13 +159,15 @@ class UnknownPage(QWidget):
         # Media Action Buttons
         media_btn_layout = QHBoxLayout()
         if has_video:
-            btn_play = QPushButton("▶ Play 60s Video")
-            btn_play.setStyleSheet("background-color: #10b981; color: white; font-weight: bold;")
+            btn_play = QPushButton(f"▶ Play {duration_sec:.0f}s Video")
+            btn_play.setCursor(Qt.PointingHandCursor)
+            btn_play.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; padding: 6px 12px; border-radius: 6px;")
             btn_play.clicked.connect(lambda _, vp=u_data["video_clip_path"]: self.play_video_clip(vp))
             media_btn_layout.addWidget(btn_play)
 
         btn_folder = QPushButton("📁 Open Folder")
-        btn_folder.setStyleSheet("background-color: #38bdf8; color: white; font-weight: bold;")
+        btn_folder.setCursor(Qt.PointingHandCursor)
+        btn_folder.setStyleSheet("background-color: #38bdf8; color: white; font-weight: bold; padding: 6px 12px; border-radius: 6px;")
         btn_folder.clicked.connect(lambda _, fd=folder_dir: self.open_person_folder(fd))
         media_btn_layout.addWidget(btn_folder)
 
@@ -137,10 +176,14 @@ class UnknownPage(QWidget):
         # Action Buttons
         btn_layout = QHBoxLayout()
         btn_enroll = QPushButton("✨ Enroll Person")
+        btn_enroll.setCursor(Qt.PointingHandCursor)
+        btn_enroll.setStyleSheet("background-color: #4f46e5; color: white; font-weight: bold; padding: 6px 12px; border-radius: 6px;")
         btn_enroll.clicked.connect(lambda _, uid=u_data["id"]: self.enroll_unknown(uid))
 
         btn_ignore = QPushButton("Ignore")
+        btn_ignore.setCursor(Qt.PointingHandCursor)
         btn_ignore.setObjectName("secondaryBtn")
+        btn_ignore.setStyleSheet("background-color: #334155; color: white; font-weight: bold; padding: 6px 12px; border-radius: 6px;")
         btn_ignore.clicked.connect(lambda _, uid=u_data["id"]: self.ignore_unknown(uid))
 
         btn_layout.addWidget(btn_enroll)

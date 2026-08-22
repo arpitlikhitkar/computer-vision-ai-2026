@@ -1,5 +1,5 @@
 """
-Custom PySide6 Dark QSS Theme Stylesheet
+Custom PySide6 Dark QSS Theme Stylesheet with Pointer Cursors on Hover
 """
 
 DARK_THEME_QSS = """

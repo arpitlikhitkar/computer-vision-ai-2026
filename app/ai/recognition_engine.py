@@ -1,6 +1,6 @@
 """
 AI Recognition Engine for PySide6 Application
-Updated with 60-second Rolling Video Recording Buffer (-30s pre-event + +30s post-event)
+Updated with Granular 3D Pose Classification & Live Multi-Modal HUD Overlay
 """
 
 import os
@@ -16,8 +16,10 @@ from src.recognition.face_quality import evaluate_face_quality
 from src.recognition.face_alignment import SFaceAligner
 from src.recognition.face_embedder import SFaceEmbedder
 from app.ai.body_reid_embedder import OSNetBodyEmbedder
+from app.ai.pose_estimator import PoseEstimator, classify_detailed_pose
 from app.ai.fusion_engine import MultiModalFusionEngine
 from app.services.video_recorder import CircularFrameBuffer, EventVideoRecorderWorker
+from app.services.alarm_service import alarm_service
 from app.database.embedding_repository import EmbeddingRepository
 from app.database.event_repository import EventRepository
 from app.database.unknown_repository import UnknownRepository
@@ -33,6 +35,7 @@ class RecognitionEngine:
         self.face_embedder = SFaceEmbedder()
         self.face_aligner = SFaceAligner(self.face_embedder.recognizer)
         self.body_embedder = OSNetBodyEmbedder(device=self.device)
+        self.pose_estimator = PoseEstimator(device=self.device)
 
         self.fusion_engine = MultiModalFusionEngine(threshold=config.recognition_threshold)
 
@@ -109,11 +112,14 @@ class RecognitionEngine:
                         "face_score": 0.0,
                         "body_score": 0.0,
                         "final_score": 0.0,
-                        "quality_msg": "",
+                        "modality": "NONE",
+                        "pose_label": "UNKNOWN_POSE",
+                        "yaw_angle": 0.0,
                         "face_bbox": None,
                         "obs_count": 0,
                         "known_obs": 0,
                         "unknown_obs": 0,
+                        "last_face_time": 0.0,
                         "recorded_event": False,
                         "last_eval_time": 0.0
                     }
@@ -126,6 +132,13 @@ class RecognitionEngine:
                 y2_c = max(0, min(y2, frame_h))
 
                 person_crop = frame_bgr[y1_c:y2_c, x1_c:x2_c]
+
+                # Estimate Pose & Skeleton
+                try:
+                    kpts = self.pose_estimator.estimate_pose_for_person(frame_bgr, [x1, y1, x2, y2])
+                    self.pose_estimator.draw_skeleton(display_frame, kpts, color=(0, 255, 255))
+                except Exception:
+                    kpts = {}
 
                 # Process AI evaluation periodically per track
                 if (
@@ -145,11 +158,13 @@ class RecognitionEngine:
                     # Extract SFace 128-d Face Embedding if face present
                     query_face_emb = None
                     faces = self.face_detector.detect_faces(person_crop)
+                    landmarks_yunet = None
 
                     if faces:
                         faces.sort(key=lambda f: f["bbox"][2] * f["bbox"][3], reverse=True)
                         best_face = faces[0]
                         state["face_bbox"] = best_face["bbox"]
+                        landmarks_yunet = best_face.get("landmarks", [])
 
                         fx, fy, fw, fh = best_face["bbox"]
                         face_crop = person_crop[fy:fy + fh, fx:fx + fw]
@@ -159,6 +174,15 @@ class RecognitionEngine:
                             aligned_chip = self.face_aligner.align_face(person_crop, best_face)
                             if aligned_chip is not None:
                                 query_face_emb = self.face_embedder.extract_embedding(aligned_chip)
+
+                    # Classify Detailed Pose (FRONTAL, LEFT_PROFILE_30, RIGHT_PROFILE, REAR, etc.)
+                    pose_lbl, yaw_deg, is_rear = classify_detailed_pose(
+                        landmarks_yunet=landmarks_yunet,
+                        pose_keypoints=kpts,
+                        face_detected=bool(faces)
+                    )
+                    state["pose_label"] = pose_lbl
+                    state["yaw_angle"] = yaw_deg
 
                     # Run Multi-Modal Score Fusion
                     self.enrolled_cache = self.embedding_repo.get_all_active_enrolled_dictionary()
@@ -171,78 +195,103 @@ class RecognitionEngine:
                     state["face_score"] = match_res["face_score"]
                     state["body_score"] = match_res["body_score"]
                     state["final_score"] = match_res["final_score"]
+                    state["modality"] = match_res["modality_used"]
                     state["obs_count"] += 1
 
                     if match_res["matched"]:
                         state["known_obs"] += 1
                         state["unknown_obs"] = 0
-                        if state["known_obs"] >= 2:
+                        state["last_face_time"] = current_time
+
+                        if state["known_obs"] >= 2 or state["state"] == "KNOWN":
                             state["state"] = "KNOWN"
                             state["person_uuid"] = match_res["person_uuid"]
                             state["display_id"] = match_res["display_id"]
                             state["display_name"] = match_res["display_name"]
 
-                            self.event_repo.add_event(
-                                track_id=track_id,
-                                person_uuid=match_res["person_uuid"],
-                                recognition_result="KNOWN",
-                                similarity_score=match_res["final_score"]
-                            )
-                    else:
-                        state["unknown_obs"] += 1
-                        if state["unknown_obs"] >= 4:
-                            state["state"] = "UNKNOWN"
-                            state["display_name"] = "UNKNOWN"
-
-                            self.event_repo.add_event(
-                                track_id=track_id,
-                                person_uuid=None,
-                                recognition_result="UNKNOWN",
-                                similarity_score=match_res["final_score"]
-                            )
-
-                            # TRIGGER 60s VIDEO RECORDING (-30s pre-event + +30s post-event)
-                            if not state["recorded_event"] and (current_time - self.last_unknown_snapshot_time) >= 10.0:
-                                state["recorded_event"] = True
-                                self.last_unknown_snapshot_time = current_time
-
-                                pre_frames = self.ring_buffer.get_pre_event_snapshot()
-                                rec_worker = EventVideoRecorderWorker(
-                                    pre_event_frames=pre_frames,
-                                    track_id=track_id,
-                                    fps=15
+                            try:
+                                self.event_repo.add_event(
+                                    event_type="PERSON_RECOGNIZED",
+                                    subject_track_id=str(track_id),
+                                    subject_name=match_res["display_name"],
+                                    confidence=float(match_res["final_score"]),
+                                    priority="INFO"
                                 )
-                                rec_worker.start()
-                                self.active_recorder_workers.append(rec_worker)
+                            except Exception as e:
+                                print(f"[EVENT] Error logging known event: {e}")
+                    else:
+                        # OCCLUSION & REAR / SIDE PROFILE HOLD PROTECTION:
+                        time_since_face = current_time - state["last_face_time"] if state["last_face_time"] > 0 else 999.0
+                        if state["state"] == "KNOWN" and (time_since_face < 8.0 or state["body_score"] >= 0.40 or is_rear):
+                            state["unknown_obs"] = 0  # Maintain KNOWN identity!
+                        else:
+                            state["unknown_obs"] += 1
+                            if state["unknown_obs"] >= 10:
+                                state["state"] = "UNKNOWN"
+                                state["display_name"] = "UNKNOWN"
 
-                # Format UI Bounding Box Label
+                                # 🚨 TRIGGER LAPTOP SPEAKER AUDIO ALARM!
+                                alarm_service.trigger_unknown_alarm()
+
+                                try:
+                                    self.event_repo.add_event(
+                                        event_type="PERSON_UNKNOWN",
+                                        subject_track_id=str(track_id),
+                                        subject_name="UNKNOWN",
+                                        confidence=float(match_res["final_score"]),
+                                        priority="WARNING"
+                                    )
+                                except Exception as e:
+                                    print(f"[EVENT] Error logging unknown event: {e}")
+
+                                # TRIGGER 60s VIDEO RECORDING (-30s pre-event + +30s post-event)
+                                if not state["recorded_event"] and (current_time - self.last_unknown_snapshot_time) >= 10.0:
+                                    state["recorded_event"] = True
+                                    self.last_unknown_snapshot_time = current_time
+
+                                    pre_frames = self.ring_buffer.get_pre_event_snapshot()
+                                    rec_worker = EventVideoRecorderWorker(
+                                        pre_event_frames=pre_frames,
+                                        track_id=track_id,
+                                        fps=15
+                                    )
+                                    rec_worker.start()
+                                    self.active_recorder_workers.append(rec_worker)
+
+                # Format Professional Live Camera HUD Labels
                 if state["state"] == "KNOWN":
                     known_count += 1
                     box_color = (0, 255, 127)  # GREEN
-                    line1 = f"{state['display_name']} ({state['display_id']}) | Track: {track_id}"
-                    line2 = f"Face: {state['face_score']*100:.0f}% | Body: {state['body_score']*100:.0f}% | Final: {state['final_score']*100:.0f}%"
+                    line1 = f"{state['display_name']} ({state['display_id']}) | Track: #{track_id}"
+                    line2 = f"Pose: {state['pose_label']} | Modality: {state['modality']}"
+                    line3 = f"Face: {state['face_score']*100:.0f}% | Body Re-ID: {state['body_score']*100:.0f}% | Final: {state['final_score']*100:.0f}%"
                 elif state["state"] == "UNKNOWN":
                     unknown_count += 1
                     box_color = (0, 0, 255)    # RED
-                    line1 = f"UNKNOWN | Track: {track_id}"
-                    line2 = f"Face: {state['face_score']*100:.0f}% | Body: {state['body_score']*100:.0f}% | Final: {state['final_score']*100:.0f}%"
+                    line1 = f"UNKNOWN | Track: #{track_id}"
+                    line2 = f"Pose: {state['pose_label']} | Modality: {state['modality']}"
+                    line3 = f"Face: {state['face_score']*100:.0f}% | Body Re-ID: {state['body_score']*100:.0f}% | Final: {state['final_score']*100:.0f}%"
                 else:
                     box_color = (0, 215, 255)  # YELLOW
-                    line1 = f"EVALUATING | Track: {track_id}"
-                    line2 = "Analyzing multi-modal identity..."
+                    line1 = f"EVALUATING | Track: #{track_id}"
+                    line2 = f"Pose: {state['pose_label']}"
+                    line3 = "Analyzing multi-modal identity..."
 
                 # Draw Bounding Box
                 cv2.rectangle(display_frame, (x1, y1), (x2, y2), box_color, 2)
 
-                # Draw Header Label Box
+                # Render 3-Line Rich HUD Header Box
                 (tw1, th1), _ = cv2.getTextSize(line1, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                 (tw2, th2), _ = cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)
-                max_w = max(tw1, tw2) + 10
-                total_h = th1 + th2 + 10
+                (tw3, th3), _ = cv2.getTextSize(line3, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)
+
+                max_w = max(tw1, tw2, tw3) + 12
+                total_h = th1 + th2 + th3 + 14
                 lbl_y1 = max(0, y1 - total_h)
 
                 cv2.rectangle(display_frame, (x1, lbl_y1), (x1 + max_w, lbl_y1 + total_h), box_color, -1)
-                cv2.putText(display_frame, line1, (x1 + 5, lbl_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-                cv2.putText(display_frame, line2, (x1 + 5, lbl_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 0), 1, cv2.LINE_AA)
+                cv2.putText(display_frame, line1, (x1 + 6, lbl_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+                cv2.putText(display_frame, line2, (x1 + 6, lbl_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 0), 1, cv2.LINE_AA)
+                cv2.putText(display_frame, line3, (x1 + 6, lbl_y1 + th1 + th2 + th3 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 0), 1, cv2.LINE_AA)
 
         return display_frame, len(active_track_ids), known_count, unknown_count

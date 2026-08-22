@@ -1,7 +1,7 @@
 """
 People Management Page for PySide6 Application (Phase 5.5)
 Displays Multi-View Face & Body Re-ID sample counts, profile management & profile merging!
-Fixed Actions column width, row height, and button text visibility.
+Sleek Actions column width, spacious padding, and Pointing Hand Cursors.
 """
 
 from PySide6.QtWidgets import (
@@ -36,10 +36,12 @@ class PeoplePage(QWidget):
         self.search_input.textChanged.connect(self.filter_members)
 
         btn_merge = QPushButton("🧩 Merge Duplicate Profiles")
-        btn_merge.setStyleSheet("background-color: #818cf8; color: white; font-weight: bold; padding: 6px 12px;")
+        btn_merge.setCursor(Qt.PointingHandCursor)
+        btn_merge.setStyleSheet("background-color: #818cf8; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
         btn_merge.clicked.connect(self.merge_duplicate_dialog)
 
         self.btn_refresh = QPushButton("🔄 Refresh List")
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
         self.btn_refresh.setObjectName("secondaryBtn")
         self.btn_refresh.clicked.connect(self.load_members)
 
@@ -57,7 +59,7 @@ class PeoplePage(QWidget):
         self.table.setHorizontalHeaderLabels([
             "Person ID", "Name", "Status", "Face Samples", "Body Re-ID Samples", "Created At", "Actions"
         ])
-        
+
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Interactive)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -67,14 +69,14 @@ class PeoplePage(QWidget):
         header.setSectionResizeMode(5, QHeaderView.Interactive)
         header.setSectionResizeMode(6, QHeaderView.Interactive)
 
-        self.table.setColumnWidth(0, 110)
+        self.table.setColumnWidth(0, 120)
         self.table.setColumnWidth(2, 100)
-        self.table.setColumnWidth(3, 130)
-        self.table.setColumnWidth(4, 150)
+        self.table.setColumnWidth(3, 140)
+        self.table.setColumnWidth(4, 160)
         self.table.setColumnWidth(5, 110)
-        self.table.setColumnWidth(6, 200)
+        self.table.setColumnWidth(6, 230)
 
-        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
 
         layout.addWidget(self.table)
@@ -117,23 +119,24 @@ class PeoplePage(QWidget):
             self.table.setItem(row_idx, 4, item_body)
             self.table.setItem(row_idx, 5, item_date)
 
-            # Actions Widget with Clear Buttons & Icons
+            # Actions Widget with Sleek Buttons & Pointing Hand Cursors
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(4, 4, 4, 4)
-            actions_layout.setSpacing(6)
+            actions_layout.setContentsMargins(6, 4, 6, 4)
+            actions_layout.setSpacing(8)
 
             btn_toggle = QPushButton("🔄 Toggle")
+            btn_toggle.setCursor(Qt.PointingHandCursor)
             btn_toggle.setStyleSheet("""
                 QPushButton {
                     background-color: #334155;
                     color: #f8fafc;
                     border: 1px solid #475569;
-                    border-radius: 4px;
-                    padding: 4px 10px;
-                    font-size: 11px;
+                    border-radius: 6px;
+                    padding: 5px 12px;
+                    font-size: 12px;
                     font-weight: bold;
-                    min-height: 26px;
+                    min-height: 28px;
                 }
                 QPushButton:hover {
                     background-color: #475569;
@@ -142,16 +145,17 @@ class PeoplePage(QWidget):
             btn_toggle.clicked.connect(lambda _, u=p["person_uuid"], s=p["status"]: self.toggle_status(u, s))
 
             btn_delete = QPushButton("🗑️ Delete")
+            btn_delete.setCursor(Qt.PointingHandCursor)
             btn_delete.setStyleSheet("""
                 QPushButton {
                     background-color: #ef4444;
                     color: white;
                     border: none;
-                    border-radius: 4px;
-                    padding: 4px 10px;
-                    font-size: 11px;
+                    border-radius: 6px;
+                    padding: 5px 12px;
+                    font-size: 12px;
                     font-weight: bold;
-                    min-height: 26px;
+                    min-height: 28px;
                 }
                 QPushButton:hover {
                     background-color: #dc2626;

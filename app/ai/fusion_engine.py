@@ -2,7 +2,7 @@
 Multi-Modal Score Fusion Engine (Phase 5.5)
 
 Combines SFace 128-d Face Cosine Similarity and OSNet 512-d Body Re-ID Cosine Similarity.
-Provides automatic fallback to Person Re-ID (body_score) when face is turned, occluded, or unavailable!
+Provides automatic fallback to Person Re-ID (body_score) when face is turned, occluded, or covered by hand!
 """
 
 import numpy as np
@@ -13,33 +13,9 @@ from src.recognition.face_matcher import compute_cosine_similarity
 class MultiModalFusionEngine:
     def __init__(self, threshold=None):
         self.threshold = threshold if threshold is not None else config.recognition_threshold
+        self.body_fallback_threshold = 0.45  # Lower threshold for Body Re-ID fallback during face occlusion
 
     def match_multi_modal(self, query_face_emb, query_body_emb, enrolled_dict):
-        """
-        Input:
-            query_face_emb: 128-d float32 vector or None
-            query_body_emb: 512-d float32 vector or None
-            enrolled_dict: {
-                person_uuid: {
-                    "display_id": "PERSON-0001",
-                    "display_name": "Rahul",
-                    "status": "ACTIVE",
-                    "face_embeddings": [128d_vecs...],
-                    "body_embeddings": [512d_vecs...]
-                }, ...
-            }
-        Returns:
-            match_result: {
-                "matched": bool,
-                "person_uuid": str or None,
-                "display_id": str or None,
-                "display_name": str,
-                "face_score": float,
-                "body_score": float,
-                "final_score": float,
-                "modality_used": str
-            }
-        """
         if not enrolled_dict:
             return {
                 "matched": False,
@@ -85,15 +61,19 @@ class MultiModalFusionEngine:
             if query_face_emb is not None and query_body_emb is not None and len(face_vecs) > 0 and len(body_vecs) > 0:
                 final_score = 0.65 * face_score + 0.35 * body_score
                 modality = "FACE+BODY"
+                req_threshold = self.threshold
             elif (query_face_emb is None or len(face_vecs) == 0) and query_body_emb is not None and len(body_vecs) > 0:
-                final_score = body_score  # Face unavailable -> Person Re-ID Fallback!
+                final_score = body_score  # Face covered/turned -> Person Re-ID Fallback!
                 modality = "BODY_REID_ONLY"
+                req_threshold = self.body_fallback_threshold  # 0.45 for body fallback
             elif query_face_emb is not None and len(face_vecs) > 0:
                 final_score = face_score  # Body unavailable -> Face Only
                 modality = "FACE_ONLY"
+                req_threshold = self.threshold
             else:
                 final_score = 0.0
                 modality = "NONE"
+                req_threshold = self.threshold
 
             if final_score > highest_final_score:
                 highest_final_score = final_score
@@ -103,8 +83,11 @@ class MultiModalFusionEngine:
                 best_uuid = uuid
                 best_display_id = person_data.get("display_id")
                 best_display_name = person_data.get("display_name", "UNKNOWN")
+                best_req_threshold = req_threshold
 
-        is_matched = highest_final_score >= self.threshold
+        is_matched = False
+        if best_uuid is not None:
+            is_matched = highest_final_score >= best_req_threshold
 
         return {
             "matched": is_matched,
